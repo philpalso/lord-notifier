@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import requests
+import certifi
 from bs4 import BeautifulSoup
 import asyncio
 import json
@@ -68,7 +69,7 @@ async def check_website():
 
     while monitoring:
         try:
-            response = requests.get(URL, timeout=10, verify="certificate.pem") #Certificate needs to change at some point
+            response = requests.get(URL, timeout=10, verify=certifi.where())) #Certificate needs to change at some point
             response.raise_for_status()
             soup = BeautifulSoup(response.text, "html.parser")
 
