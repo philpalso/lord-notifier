@@ -9,11 +9,17 @@ import logging
 import os
 
 # Logging setup
-LOG_FILE = "bot.log"
+DATA_DIR = os.getenv("DATA_DIR", ".")  
+LOG_FILE = os.path.join(DATA_DIR, "bot.log")
+LAST_DATES_FILE = os.path.join(DATA_DIR, "last_dates.txt")
+
 logging.basicConfig(
-    filename=LOG_FILE,
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
+    handlers=[
+        logging.StreamHandler(),           # stdout → visible in Railway logs
+        logging.FileHandler(LOG_FILE),     # file → only works with a Volume
+    ]
 )
 
 # Load config
@@ -25,7 +31,6 @@ CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL", config.get("CHANNEL_ID")))  # Pref
 URL = config["URL"]
 CHECK_INTERVAL = config["CHECK_INTERVAL"]
 
-LAST_DATES_FILE = "last_dates.txt"
 monitoring = True  # Global flag to control monitoring
 
 # Read last dates from file
@@ -91,7 +96,8 @@ async def check_website():
 
         except Exception as e:
             logging.error(f"Error checking website: {e}")
-            message += f"📛 Error checking website: {e}"
+            if channel:
+                await channel.send(f"📛 Error checking website: {e}")
 
         await asyncio.sleep(CHECK_INTERVAL)
 
