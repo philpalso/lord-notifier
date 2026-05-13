@@ -15,7 +15,7 @@ LAST_DATES_FILE = os.path.join(DATA_DIR, "last_dates.txt")
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
+    format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
         logging.StreamHandler(),           # stdout → visible in Railway logs
         logging.FileHandler(LOG_FILE),     # file → only works with a Volume
