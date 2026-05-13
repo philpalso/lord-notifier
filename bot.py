@@ -69,7 +69,7 @@ async def check_website():
 
     while monitoring:
         try:
-            response = requests.get(URL, timeout=10, verify=certifi.where())) #Certificate needs to change at some point
+            response = requests.get(URL, timeout=10, verify=certifi.where()) #Certificate needs to change at some point
             response.raise_for_status()
             soup = BeautifulSoup(response.text, "html.parser")
 
