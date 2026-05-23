@@ -209,18 +209,29 @@ async def dates(interaction: discord.Interaction):
     else:
         await interaction.response.send_message("No dates found yet.")
 
+@bot.tree.command(name="list_events", description="List all known programme events")
+async def list_events(interaction: discord.Interaction):
+    events = read_last_events()
+    if not events:
+        await interaction.response.send_message("No events stored yet. The bot hasn't done a check, or the programme is empty.")
+        return
 
-@bot.tree.command(name="help", description="Show all available commands")
-async def help_command(interaction: discord.Interaction):
-    help_text = (
-        "**Available Commands:**\n"
-        "/start - Start monitoring the festival programme\n"
-        "/stop - Stop monitoring\n"
-        "/status - Check bot status\n"
-        "/dates - Show currently detected festival dates\n"
-        "/show-log - Display the last 10 log entries\n"
-    )
-    await interaction.response.send_message(help_text)
+    sorted_events = sorted(events)
+    lines = "\n".join(f"• {e}" for e in sorted_events)
+    full_text = f"**Known programme events ({len(sorted_events)} total):**\n{lines}"
+
+    if len(full_text) <= 1900:
+        await interaction.response.send_message(full_text)
+    else:
+        # Write to a temp file and send as attachment
+        file_path = os.path.join(DATA_DIR, "events_list.txt")
+        with open(file_path, "w") as f:
+            f.write("\n".join(sorted_events))
+        await interaction.response.send_message(
+            f"📋 Too many events to list inline ({len(sorted_events)} total). Here's the full list as a file:",
+            file=discord.File(file_path)
+        )
+
 
 @bot.tree.command(name="show-log", description="Show the last 10 log entries")
 async def show_log(interaction: discord.Interaction):
