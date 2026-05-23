@@ -61,6 +61,10 @@ def read_log_lines(n=10):
         lines = f.readlines()
     return lines[-n:] if len(lines) > n else lines
 
+def save_ignored_event(term):
+    with open(_file("ignored_events"), "a") as f:  # append, not overwrite
+        f.write(term.strip() + "\n")
+
 
 
 # Discord bot setup
@@ -74,6 +78,7 @@ async def check_website():
     target_notified = set()  # Tracks which keyword matches we've already alerted on
     known_events = read_file("known_events")
     ignored_events = read_file("ignored_events")
+    all_events = known_events + ignored_events
 
     while monitoring:
         try:
@@ -129,10 +134,10 @@ async def check_website():
             )
 
             if known_events:
-                new_events = all_titles - known_events - ignored_events 
+                new_events = all_titles - all_events 
                 if new_events:
                     merged = known_events | all_titles
-                    save_last_events(merged)
+                    write_file("known_events",merged)
                     known_events = merged
 
                     lines = "\n".join(f"• {e}" for e in sorted(new_events))
@@ -148,8 +153,10 @@ async def check_website():
                     logging.info(f"{len(new_events)} new events added to known list.")
             else:
                 # First run — just store what's there, don't alert
-                known_events = all_titles
-                save_last_events(known_events)
+                merged = all_titles - ignored_events
+                write_file("known_events",merged)
+                known_events = merged
+                
                 logging.info(f"Initial event list saved: {len(known_events)} events.")
 
         except Exception as e:
@@ -196,7 +203,7 @@ async def status(interaction: discord.Interaction):
 
 @bot.tree.command(name="dates", description="Show currently detected festival dates")
 async def dates(interaction: discord.Interaction):
-    current_dates = read_last_dates()
+    current_dates = read_file("known_dates")
     if current_dates:
         await interaction.response.send_message(f"📅 Current dates: {', '.join(sorted(current_dates))}")
     else:
@@ -204,7 +211,7 @@ async def dates(interaction: discord.Interaction):
 
 @bot.tree.command(name="list_events", description="List all known programme events")
 async def list_events(interaction: discord.Interaction):
-    events = read_last_events()
+    events = read_file("known_events")
     if not events:
         await interaction.response.send_message("No events stored yet. The bot hasn't done a check, or the programme is empty.")
         return
@@ -217,14 +224,21 @@ async def list_events(interaction: discord.Interaction):
         await interaction.response.send_message(full_text)
     else:
         # Write to a temp file and send as attachment
-        file_path = os.path.join(DATA_DIR, "events_list.txt")
-        with open(file_path, "w") as f:
-            f.write("\n".join(sorted_events))
+        write_file("temp_events",sorted_events)
         await interaction.response.send_message(
             f"📋 Too many events to list inline ({len(sorted_events)} total). Here's the full list as a file:",
             file=discord.File(file_path)
         )
 
+@bot.tree.command(name="ignore", description="Add an event keyword to the ignore list")
+async def ignore(interaction: discord.Interaction, term: str):
+    ignored = read_file("ignored_events")
+    if term.lower() in {e.lower() for e in ignored}:
+        await interaction.response.send_message(f"⚠️ **{term}** is already in the ignore list.")
+        return
+    save_ignored_event(term)
+    
+    await interaction.response.send_message(f"✅ **{term}** added to ignore list.")
 
 @bot.tree.command(name="show-log", description="Show the last 10 log entries")
 async def show_log(interaction: discord.Interaction):
