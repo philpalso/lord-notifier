@@ -173,7 +173,7 @@ async def heartbeat():
     while True:
         await channel.send("❤️‍🔥 Heartbeat: I am alive and checking for changes")
         logging.info("Heartbeat message sent to Discord.")
-        await asyncio.sleep(86400)  # 24 hours in seconds
+        await asyncio.sleep(259200)  # 3 x 24 hours in seconds
         
 # Slash commands
 @bot.tree.command(name="start", description="Start monitoring the festival programme")
