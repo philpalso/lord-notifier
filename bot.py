@@ -16,7 +16,7 @@ with open("config.json") as f:
 # Setup variables from .env
 DATA_DIR = os.getenv("DATA_DIR", ".")  
 TOKEN = os.getenv("DISCORD_TOKEN")  # Prefer env var for Railway
-CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL")  # Prefer env var for Railway
+CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL"))  # Prefer env var for Railway
 
  
 # Get config data
@@ -25,17 +25,6 @@ CHECK_INTERVAL = config["CHECK_INTERVAL"]
 TARGET_KEYWORDS = config.get("TARGET_KEYWORDS", [])
 monitoring = True  # Global flag to control monitoring
 
-#Define logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[
-    #    logging.StreamHandler(),           # stdout → visible in Railway logs
-        logging.FileHandler(LOG_FILE),     # file → only works with a Volume
-    ]
-)
-
-# Read and write files
 # Setup path to used files
 LOG_FILE = os.path.join(DATA_DIR, "bot.log")
 def _file(x):
@@ -48,7 +37,7 @@ def read_file(filename):
             return set(line.strip() for line in f if line.strip())
     return set()
 
-def write_file(events, filename):
+def write_file(filename, events):
     my_file = _file(filename)
     with open(my_file, "w") as f:
         f.write("\n".join(sorted(events)))
@@ -61,11 +50,19 @@ def read_log_lines(n=10):
         lines = f.readlines()
     return lines[-n:] if len(lines) > n else lines
 
-def save_ignored_event(term):
-    with open(_file("ignored_events"), "a") as f:  # append, not overwrite
+def append_file(filename, term):
+    with open(_file(filename), "a") as f:
         f.write(term.strip() + "\n")
 
-
+#Define logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(),           # stdout → visible in Railway logs
+        logging.FileHandler(LOG_FILE),     # file → only works with a Volume
+    ]
+)
 
 # Discord bot setup
 intents = discord.Intents.default()
@@ -78,19 +75,22 @@ async def check_website():
     target_notified = set()  # Tracks which keyword matches we've already alerted on
     known_events = read_file("known_events")
     ignored_events = read_file("ignored_events")
-    all_events = known_events + ignored_events
 
     while monitoring:
         try:
+            ignored_events = read_file("ignored_events")
             response = requests.get(URL, timeout=10, verify=certifi.where())
             response.raise_for_status()
             soup = BeautifulSoup(response.text, "html.parser")
 
             # --- TARGET EVENT WATCH ---
             # Look for any event block that contains a target keyword AND a ticket link
-            event_blocks = soup.select("li, div.event, article")  # cast wide net
+           # event_blocks = soup.select("li, div.event, article")  # cast wide net
             # Fallback: scan all <strong> tags with their parent context
             for strong in soup.select("strong"):
+                
+
+                
                 title = strong.get_text(strip=True)
                 title_lower = title.lower()
 
@@ -131,10 +131,11 @@ async def check_website():
                 el.get_text(strip=True)
                 for el in soup.select("strong")
                 if el.get_text(strip=True)
+                and el.get_text(strip=True) not in ignored_events  # filter ignored full titles
             )
 
             if known_events:
-                new_events = all_titles - all_events 
+                new_events = all_titles - known_events
                 if new_events:
                     merged = known_events | all_titles
                     write_file("known_events",merged)
@@ -153,7 +154,7 @@ async def check_website():
                     logging.info(f"{len(new_events)} new events added to known list.")
             else:
                 # First run — just store what's there, don't alert
-                merged = all_titles - ignored_events
+                merged = all_titles
                 write_file("known_events",merged)
                 known_events = merged
                 
@@ -201,13 +202,15 @@ async def status(interaction: discord.Interaction):
     msg += "Monitoring: " + ("ON" if monitoring else "OFF")
     await interaction.response.send_message(msg)
 
-@bot.tree.command(name="dates", description="Show currently detected festival dates")
-async def dates(interaction: discord.Interaction):
-    current_dates = read_file("known_dates")
-    if current_dates:
-        await interaction.response.send_message(f"📅 Current dates: {', '.join(sorted(current_dates))}")
-    else:
-        await interaction.response.send_message("No dates found yet.")
+###
+#@bot.tree.command(name="dates", description="Show currently detected festival dates")
+#async def dates(interaction: discord.Interaction):
+#    current_dates = read_file("known_dates")
+#    if current_dates:
+#        await interaction.response.send_message(f"📅 Current dates: {', '.join(sorted(current_dates))}")
+#    else:
+#        await interaction.response.send_message("No dates found yet.")
+###
 
 @bot.tree.command(name="list_events", description="List all known programme events")
 async def list_events(interaction: discord.Interaction):
@@ -224,7 +227,30 @@ async def list_events(interaction: discord.Interaction):
         await interaction.response.send_message(full_text)
     else:
         # Write to a temp file and send as attachment
+        file_path=_file("temp_events")
         write_file("temp_events",sorted_events)
+        await interaction.response.send_message(
+            f"📋 Too many events to list inline ({len(sorted_events)} total). Here's the full list as a file:",
+            file=discord.File(file_path)
+        )
+
+@bot.tree.command(name="list_ignored", description="List all ignored programme events")
+async def list_ignored(interaction: discord.Interaction):
+    events = read_file("ignored_events")
+    if not events:
+        await interaction.response.send_message("No events stored yet. Use /ignore if you want to add any.")
+        return
+
+    sorted_events = sorted(events)
+    lines = "\n".join(f"• {e}" for e in sorted_events)
+    full_text = f"**Ignored programme events ({len(sorted_events)} total):**\n{lines}"
+
+    if len(full_text) <= 1900:
+        await interaction.response.send_message(full_text)
+    else:
+        # Write to a temp file and send as attachment
+        file_path=_file("ig_temp_events")
+        write_file("ig_temp_events",sorted_events)
         await interaction.response.send_message(
             f"📋 Too many events to list inline ({len(sorted_events)} total). Here's the full list as a file:",
             file=discord.File(file_path)
@@ -236,7 +262,7 @@ async def ignore(interaction: discord.Interaction, term: str):
     if term.lower() in {e.lower() for e in ignored}:
         await interaction.response.send_message(f"⚠️ **{term}** is already in the ignore list.")
         return
-    save_ignored_event(term)
+    append_file("ignored_events",term)
     
     await interaction.response.send_message(f"✅ **{term}** added to ignore list.")
 
