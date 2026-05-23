@@ -9,46 +9,50 @@ import json
 import logging
 import os
 
-
-
-# Logging setup
-DATA_DIR = os.getenv("DATA_DIR", ".")  
-LOG_FILE = os.path.join(DATA_DIR, "bot.log")
-LAST_DATES_FILE = os.path.join(DATA_DIR, "last_dates.txt")
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(),           # stdout → visible in Railway logs
-        logging.FileHandler(LOG_FILE),     # file → only works with a Volume
-    ]
-)
-
 # Load config
 with open("config.json") as f:
     config = json.load(f)
 
-TOKEN = os.getenv("DISCORD_TOKEN", config.get("TOKEN"))  # Prefer env var for Railway
-CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL", config.get("CHANNEL_ID")))  # Prefer env var for Railway
+# Setup variables from .env
+DATA_DIR = os.getenv("DATA_DIR", ".")  
+TOKEN = os.getenv("DISCORD_TOKEN")  # Prefer env var for Railway
+CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL")  # Prefer env var for Railway
+
+ 
+# Get config data
 URL = config["URL"]
 CHECK_INTERVAL = config["CHECK_INTERVAL"]
-
+TARGET_KEYWORDS = config.get("TARGET_KEYWORDS", [])
 monitoring = True  # Global flag to control monitoring
 
-# Read last dates from file
-def read_last_dates():
-    if os.path.exists(LAST_DATES_FILE):
-        with open(LAST_DATES_FILE, "r") as f:
-            return set(f.read().splitlines())
+#Define logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+    #    logging.StreamHandler(),           # stdout → visible in Railway logs
+        logging.FileHandler(LOG_FILE),     # file → only works with a Volume
+    ]
+)
+
+# Read and write files
+# Setup path to used files
+LOG_FILE = os.path.join(DATA_DIR, "bot.log")
+def _file(x):
+    return os.path.join(DATA_DIR,f"{x}.txt")
+    
+def read_file(filename):
+    my_file = _file(filename)
+    if os.path.exists(my_file):
+        with open(my_file, "r") as f:
+            return set(line.strip() for line in f if line.strip())
     return set()
 
-# Save current dates to file
-def save_last_dates(dates):
-    with open(LAST_DATES_FILE, "w") as f:
-        f.write("\n".join(dates))
-        
-
+def write_file(events, filename):
+    my_file = _file(filename)
+    with open(my_file, "w") as f:
+        f.write("\n".join(sorted(events)))
+     
 # Read last N lines from log file
 def read_log_lines(n=10):
     if not os.path.exists(LOG_FILE):
@@ -57,19 +61,7 @@ def read_log_lines(n=10):
         lines = f.readlines()
     return lines[-n:] if len(lines) > n else lines
 
-# Near your other file constants
-LAST_EVENTS_FILE = os.path.join(DATA_DIR, "last_events.txt")
-TARGET_KEYWORDS = config.get("TARGET_KEYWORDS", [])
 
-def read_last_events():
-    if os.path.exists(LAST_EVENTS_FILE):
-        with open(LAST_EVENTS_FILE, "r") as f:
-            return set(line.strip() for line in f if line.strip())
-    return set()
-
-def save_last_events(events):
-    with open(LAST_EVENTS_FILE, "w") as f:
-        f.write("\n".join(sorted(events)))
 
 # Discord bot setup
 intents = discord.Intents.default()
@@ -80,7 +72,8 @@ async def check_website():
     await bot.wait_until_ready()
     channel = bot.get_channel(CHANNEL_ID)
     target_notified = set()  # Tracks which keyword matches we've already alerted on
-    known_events = read_last_events()
+    known_events = read_file("known_events")
+    ignored_events = read_file("ignored_events")
 
     while monitoring:
         try:
@@ -136,7 +129,7 @@ async def check_website():
             )
 
             if known_events:
-                new_events = all_titles - known_events
+                new_events = all_titles - known_events - ignored_events 
                 if new_events:
                     merged = known_events | all_titles
                     save_last_events(merged)
