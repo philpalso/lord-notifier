@@ -248,7 +248,7 @@ async def on_ready():
         logging.info("Slash commands synced!")
     except Exception as e:
         logging.error(f"Error syncing commands: {e}")
-
+    asyncio.create_task(check_website())
     # Start heartbeat task
     asyncio.create_task(heartbeat())
 
