@@ -1,4 +1,6 @@
 {
     "URL": "https://www.medeltidsveckan.se/programme/",
-    "CHECK_INTERVAL": 600
+    "CHECK_INTERVAL": 600,
+    "TARGET_KEYWORDS": ["smide", "smed", "silver"],
+    "TARGET_EVENT": ""
 }
