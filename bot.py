@@ -9,6 +9,8 @@ import json
 import logging
 import os
 
+
+
 # Logging setup
 DATA_DIR = os.getenv("DATA_DIR", ".")  
 LOG_FILE = os.path.join(DATA_DIR, "bot.log")
@@ -55,6 +57,19 @@ def read_log_lines(n=10):
         lines = f.readlines()
     return lines[-n:] if len(lines) > n else lines
 
+# Near your other file constants
+LAST_EVENTS_FILE = os.path.join(DATA_DIR, "last_events.txt")
+TARGET_KEYWORDS = config.get("TARGET_KEYWORDS", [])
+
+def read_last_events():
+    if os.path.exists(LAST_EVENTS_FILE):
+        with open(LAST_EVENTS_FILE, "r") as f:
+            return set(line.strip() for line in f if line.strip())
+    return set()
+
+def save_last_events(events):
+    with open(LAST_EVENTS_FILE, "w") as f:
+        f.write("\n".join(sorted(events)))
 
 # Discord bot setup
 intents = discord.Intents.default()
@@ -64,36 +79,85 @@ async def check_website():
     global monitoring
     await bot.wait_until_ready()
     channel = bot.get_channel(CHANNEL_ID)
-    last_dates = read_last_dates()
-
+    target_notified = set()  # Tracks which keyword matches we've already alerted on
+    known_events = read_last_events()
 
     while monitoring:
         try:
-            response = requests.get(URL, timeout=10, verify=certifi.where()) #Certificate needs to change at some point
+            response = requests.get(URL, timeout=10, verify=certifi.where())
             response.raise_for_status()
             soup = BeautifulSoup(response.text, "html.parser")
 
-            # Find all elements with ID starting with 'date-'
-            elements = soup.select("[id^='date-']")
-            current_dates = set(el.get("id") for el in elements if el.get("id"))
+            # --- TARGET EVENT WATCH ---
+            # Look for any event block that contains a target keyword AND a ticket link
+            event_blocks = soup.select("li, div.event, article")  # cast wide net
+            # Fallback: scan all <strong> tags with their parent context
+            for strong in soup.select("strong"):
+                title = strong.get_text(strip=True)
+                title_lower = title.lower()
 
-            logging.info(f"Current dates: {current_dates}")
+                matched_keyword = next(
+                    (kw for kw in TARGET_KEYWORDS if kw.lower() in title_lower), None
+                )
+                if not matched_keyword:
+                    continue
 
-            if last_dates and current_dates != last_dates:
-                added = current_dates - last_dates
-                removed = last_dates - current_dates
+                # Check if a ticket link exists near this element
+                parent = strong.find_parent()
+                has_ticket = False
+                if parent:
+                    ticket_link = parent.find("a", href=lambda h: h and "nortic.se" in h)
+                    has_ticket = ticket_link is not None
 
-                message = "🔔 Festival programme updated!\n"
-                if added:
-                    message += f"✅ New dates added: {', '.join(sorted(added))}\n"
-                if removed:
-                    message += f"❌ Dates removed: {', '.join(sorted(removed))}\n"
+                alert_key = title  # Use full title so same keyword can re-alert for new events
+                if alert_key not in target_notified:
+                    if has_ticket:
+                        ticket_url = ticket_link["href"]
+                        await channel.send(
+                            f"🚨 **Target event found with tickets!**\n"
+                            f"**{title}**\n"
+                            f"🎟️ Buy tickets: {ticket_url}"
+                        )
+                        logging.info(f"Target event with ticket found: {title}")
+                    else:
+                        await channel.send(
+                            f"👀 **Target event appeared (no ticket link yet)**\n"
+                            f"**{title}**\n"
+                            f"Keep watching: {URL}"
+                        )
+                        logging.info(f"Target event without ticket found: {title}")
+                    target_notified.add(alert_key)
 
-                await channel.send(message)
-                logging.info("Change detected and message sent.")
+            # --- GENERAL PROGRAMME CHANGES ---
+            all_titles = set(
+                el.get_text(strip=True)
+                for el in soup.select("strong")
+                if el.get_text(strip=True)
+            )
 
-            last_dates = current_dates
-            save_last_dates(current_dates)
+            if known_events:
+                new_events = all_titles - known_events
+                if new_events:
+                    merged = known_events | all_titles
+                    save_last_events(merged)
+                    known_events = merged
+
+                    lines = "\n".join(f"• {e}" for e in sorted(new_events))
+                    # Discord has a 2000 char limit — chunk if needed
+                    message = f"📋 **Programme updated! {len(new_events)} new event(s):**\n{lines}"
+                    if len(message) > 1900:
+                        message = (
+                            f"📋 **Programme updated! {len(new_events)} new event(s):**\n"
+                            + "\n".join(f"• {e}" for e in sorted(new_events))[:1800]
+                            + "\n…(truncated)"
+                        )
+                    await channel.send(message)
+                    logging.info(f"{len(new_events)} new events added to known list.")
+            else:
+                # First run — just store what's there, don't alert
+                known_events = all_titles
+                save_last_events(known_events)
+                logging.info(f"Initial event list saved: {len(known_events)} events.")
 
         except Exception as e:
             logging.error(f"Error checking website: {e}")
@@ -102,13 +166,14 @@ async def check_website():
 
         await asyncio.sleep(CHECK_INTERVAL)
 
+
 async def heartbeat():
     await bot.wait_until_ready()
     channel = bot.get_channel(CHANNEL_ID)
     while True:
         await channel.send("❤️‍🔥 Heartbeat: I am alive and checking for changes")
         logging.info("Heartbeat message sent to Discord.")
-        await asyncio.sleep(86400)  # 24 hours in seconds
+        await asyncio.sleep(259200)  # 3 x 24 hours in seconds
         
 # Slash commands
 @bot.tree.command(name="start", description="Start monitoring the festival programme")
@@ -144,18 +209,29 @@ async def dates(interaction: discord.Interaction):
     else:
         await interaction.response.send_message("No dates found yet.")
 
+@bot.tree.command(name="list_events", description="List all known programme events")
+async def list_events(interaction: discord.Interaction):
+    events = read_last_events()
+    if not events:
+        await interaction.response.send_message("No events stored yet. The bot hasn't done a check, or the programme is empty.")
+        return
 
-@bot.tree.command(name="help", description="Show all available commands")
-async def help_command(interaction: discord.Interaction):
-    help_text = (
-        "**Available Commands:**\n"
-        "/start - Start monitoring the festival programme\n"
-        "/stop - Stop monitoring\n"
-        "/status - Check bot status\n"
-        "/dates - Show currently detected festival dates\n"
-        "/show-log - Display the last 10 log entries\n"
-    )
-    await interaction.response.send_message(help_text)
+    sorted_events = sorted(events)
+    lines = "\n".join(f"• {e}" for e in sorted_events)
+    full_text = f"**Known programme events ({len(sorted_events)} total):**\n{lines}"
+
+    if len(full_text) <= 1900:
+        await interaction.response.send_message(full_text)
+    else:
+        # Write to a temp file and send as attachment
+        file_path = os.path.join(DATA_DIR, "events_list.txt")
+        with open(file_path, "w") as f:
+            f.write("\n".join(sorted_events))
+        await interaction.response.send_message(
+            f"📋 Too many events to list inline ({len(sorted_events)} total). Here's the full list as a file:",
+            file=discord.File(file_path)
+        )
+
 
 @bot.tree.command(name="show-log", description="Show the last 10 log entries")
 async def show_log(interaction: discord.Interaction):
