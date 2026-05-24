@@ -256,15 +256,23 @@ async def list_ignored(interaction: discord.Interaction):
             file=discord.File(file_path)
         )
 
-@bot.tree.command(name="ignore", description="Add an event keyword to the ignore list")
+@bot.tree.command(name="ignore", description="Add an event to the ignore list")
 async def ignore(interaction: discord.Interaction, term: str):
     ignored = read_file("ignored_events")
     if term.lower() in {e.lower() for e in ignored}:
         await interaction.response.send_message(f"⚠️ **{term}** is already in the ignore list.")
         return
-    append_file("ignored_events",term)
     
-    await interaction.response.send_message(f"✅ **{term}** added to ignore list.")
+    append_file("ignored_events", term)
+
+    # Remove from known_events if present
+    known = read_file("known_events")
+    if term in known:
+        known.discard(term)
+        write_file("known_events", known)
+        await interaction.response.send_message(f"✅ **{term}** added to ignore list and removed from known events.")
+    else:
+        await interaction.response.send_message(f"✅ **{term}** added to ignore list.")
 
 @bot.tree.command(name="show-log", description="Show the last 10 log entries")
 async def show_log(interaction: discord.Interaction):
